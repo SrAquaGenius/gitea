@@ -11,6 +11,12 @@ import (
 	"path"
 	"strings"
 
+	"strconv"
+	"bytes"
+	"image"
+	"image/jpeg"
+	"github.com/nfnt/resize"
+
 	"code.gitea.io/gitea/modules/httpcache"
 	"code.gitea.io/gitea/modules/log"
 	"code.gitea.io/gitea/modules/setting"
@@ -93,6 +99,42 @@ func storageHandler(storageSetting *setting.Storage, prefix string, objStore sto
 			return
 		}
 		defer fr.Close()
-		httpcache.ServeContentWithCacheControl(w, req, path.Base(rPath), fi.ModTime(), fr)
+
+		// Extract the size value
+		query := req.URL.Query()
+		avatarStrSize := query.Get("size")
+
+		if avatarStrSize != "" {
+			log.Warn("Size value: %s", avatarStrSize)
+		} else {
+			log.Warn("Size value not found in the URL")
+		}
+
+		avatar64Size, err := strconv.ParseUint(avatarStrSize, 10, 64)
+		if err != nil {
+			log.Error("Couldn't convert to integer")
+		}
+
+		avatarSize := uint(avatar64Size)
+
+		// Decode the image
+		originalImage, _, err := image.Decode(fr)
+		if err != nil {
+			log.Error("Error decoding image: %v", err)
+		}
+
+		// Resize the image
+		newImage := resize.Resize(avatarSize, 0, originalImage, resize.Lanczos3)
+
+		// Encode the resized image as JPEG
+		var resizedImageBuf bytes.Buffer
+		err = jpeg.Encode(&resizedImageBuf, newImage, nil)
+		if err != nil {
+			log.Error("Error encoding resized image: %v", err)
+		}
+
+		resizedImageReader := bytes.NewReader(resizedImageBuf.Bytes())
+
+		httpcache.ServeContentWithCacheControl(w, req, path.Base(rPath), fi.ModTime(), resizedImageReader)
 	})
 }
